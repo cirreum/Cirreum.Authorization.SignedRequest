@@ -18,16 +18,19 @@
 - **Replay protection** - Timestamp validation rejects stale requests (default 2 minutes)
 - **Signature versioning** - Future-proof with `v1=` prefix for algorithm upgrades
 - **Key rotation** - Support multiple active signing credentials per client
+- **Per-client options** - Override timestamp tolerance and signature versions per client
 - **Rate limiting hooks** - `ISignatureValidationEvents` interface for custom rate limiting
 - **Efficient lookup** - Direct database query by `X-Client-Id` header
 - **Constant-time comparison** - Prevents timing attacks on signature validation
+- **Outbound signing** - Sign outgoing webhooks and service-to-service requests
 
 ### Use Cases
 
 - External partner/customer API access
 - Financial transaction APIs
 - ISO 27001 / PCI-DSS compliance requirements
-- Webhook signature validation
+- **Sending signed webhooks** to customers
+- **Receiving signed requests** from partners
 - High-security service-to-service communication
 
 ### Comparison with API Keys
@@ -91,7 +94,10 @@ public class DatabaseSignedRequestResolver : DynamicSignedRequestClientResolver 
                 IsActive,
                 ExpiresAt,
                 Roles,
-                Claims
+                Claims,
+                TimestampTolerance,
+                FutureTimestampTolerance,
+                SupportedSignatureVersions
             FROM SigningCredentials
             WHERE ClientId = @ClientId
               AND IsActive = 1
@@ -145,50 +151,91 @@ Example:
 
 ### Partner Implementation (Client Side)
 
+For partners consuming your API, point them to the lightweight client SDK:
+
+```bash
+dotnet add package Cirreum.Authorization.SignedRequest.Client
+```
+
 ```csharp
-public async Task<HttpResponseMessage> SendSignedRequest(
-    HttpClient client,
-    HttpMethod method,
-    string path,
-    string? body = null) {
+using System.Net.Http;
 
-    var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-    var bodyHash = ComputeBodyHash(body);
-    var canonical = $"{timestamp}.{method.Method}.{path}.{bodyHash}";
-    var signature = ComputeHmacSignature(canonical, _signingSecret);
+var credentials = new SigningCredentials("partner_acme_corp", "their-signing-secret");
 
-    var request = new HttpRequestMessage(method, path);
-    request.Headers.Add("X-Client-Id", _clientId);
-    request.Headers.Add("X-Timestamp", timestamp.ToString());
-    request.Headers.Add("X-Signature", $"v1={signature}");
+var response = await httpClient.SendSignedAsync(
+    HttpMethod.Post,
+    "https://api.yourcompany.com/transactions",
+    credentials,
+    content: new { amount = 100.00, currency = "USD" });
+```
 
-    if (body is not null) {
-        request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+See [Cirreum.Authorization.SignedRequest.Client](https://www.nuget.org/packages/Cirreum.Authorization.SignedRequest.Client/) for full documentation.
+
+## Sending Signed Webhooks
+
+When your server needs to send signed requests to customers (webhooks), use the outbound signing extensions:
+
+```csharp
+using System.Net.Http;
+
+public class WebhookService {
+    private readonly HttpClient _httpClient;
+    private readonly ICustomerRepository _customers;
+
+    public WebhookService(HttpClient httpClient, ICustomerRepository customers) {
+        _httpClient = httpClient;
+        _customers = customers;
     }
 
-    return await client.SendAsync(request);
-}
+    public async Task SendWebhookAsync(string customerId, object payload) {
+        // Look up customer's webhook configuration
+        var customer = await _customers.GetAsync(customerId);
 
-private static string ComputeBodyHash(string? body) {
-    if (string.IsNullOrEmpty(body)) {
-        return "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        // Sign and send the webhook
+        var response = await _httpClient.SendSignedAsync(
+            HttpMethod.Post,
+            customer.WebhookUrl,
+            customer.ClientId,
+            customer.WebhookSigningSecret,
+            content: payload);
+
+        // Handle response...
     }
-    var bytes = Encoding.UTF8.GetBytes(body);
-    var hash = SHA256.HashData(bytes);
-    return Convert.ToHexString(hash).ToLowerInvariant();
 }
+```
 
-private static string ComputeHmacSignature(string canonical, string secret) {
-    var keyBytes = Encoding.UTF8.GetBytes(secret);
-    var messageBytes = Encoding.UTF8.GetBytes(canonical);
-    var hmac = HMACSHA256.HashData(keyBytes, messageBytes);
-    return Convert.ToHexString(hmac).ToLowerInvariant();
-}
+### Signing Options
+
+```csharp
+var options = new OutboundSigningOptions {
+    SignatureVersion = "v1",
+    IncludeQueryString = true,
+    ClientIdHeaderName = "X-Client-Id",
+    TimestampHeaderName = "X-Timestamp",
+    SignatureHeaderName = "X-Signature"
+};
+
+await httpClient.SendSignedAsync(request, clientId, secret, options);
+```
+
+### Sign Without Sending
+
+```csharp
+var request = new HttpRequestMessage(HttpMethod.Post, webhookUrl);
+request.Content = JsonContent.Create(payload);
+
+// Sign the request (adds headers)
+await request.SignRequestAsync(clientId, signingSecret);
+
+// Send later or inspect headers
+var response = await httpClient.SendAsync(request);
 ```
 
 ## Configuration
 
-### Validation Options
+### Global Validation Options
+
+Configure app-wide defaults at startup:
 
 ```csharp
 builder
@@ -202,6 +249,32 @@ builder
             v.SignatureHeaderName = "X-Signature";
             v.TimestampHeaderName = "X-Timestamp";
         }));
+```
+
+### Per-Client Overrides
+
+Override specific settings per client via `StoredSigningCredential` properties:
+
+| Property | Description | Use Case |
+|----------|-------------|----------|
+| `TimestampTolerance` | Max request age for this client | Clients with clock skew issues |
+| `FutureTimestampTolerance` | Future timestamp allowance | Clients with clocks running ahead |
+| `SupportedSignatureVersions` | Allowed signature versions | Restrict legacy clients to v1, allow v2 for new clients |
+
+When null, the global app defaults are used. This enables fine-grained control without affecting other clients:
+
+```csharp
+// In your resolver, return credentials with per-client overrides
+new StoredSigningCredential {
+    CredentialId = "cred_123",
+    ClientId = "partner_legacy",
+    ClientName = "Legacy Partner",
+    SigningSecret = "...",
+    // Allow 5 minutes for this client with known clock issues
+    TimestampTolerance = TimeSpan.FromMinutes(5),
+    // Restrict to v1 only
+    SupportedSignatureVersions = new HashSet<string> { "v1" }
+};
 ```
 
 ### Rate Limiting Events
@@ -282,6 +355,9 @@ CREATE TABLE SigningCredentials (
     ExpiresAt DATETIME2 NULL,
     Roles NVARCHAR(MAX) NULL,              -- JSON array
     Claims NVARCHAR(MAX) NULL,             -- JSON object
+    TimestampTolerance INT NULL,           -- Seconds, per-client override
+    FutureTimestampTolerance INT NULL,     -- Seconds, per-client override
+    SupportedSignatureVersions NVARCHAR(MAX) NULL, -- JSON array, e.g. ["v1", "v2"]
     CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
 
     INDEX IX_SigningCredentials_ClientId (ClientId)
