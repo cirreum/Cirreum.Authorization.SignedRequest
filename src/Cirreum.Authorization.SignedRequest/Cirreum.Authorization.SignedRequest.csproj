@@ -8,16 +8,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
-	</ItemGroup>
-
-	<!-- Use project reference for local development -->
-	<ItemGroup Condition="'$(IsLocalBuild)' == 'true'">
-		<ProjectReference Include="..\..\..\..\Core\Cirreum.AuthorizationProvider\src\Cirreum.AuthorizationProvider\Cirreum.AuthorizationProvider.csproj" />
-	</ItemGroup>
-
-	<!-- Use package reference for CI/CD -->
-	<ItemGroup Condition="'$(IsLocalBuild)' != 'true'">
-		<PackageReference Include="Cirreum.AuthorizationProvider" Version="1.0.8" />
+		<PackageReference Include="Cirreum.AuthorizationProvider" Version="1.0.9" />
 	</ItemGroup>
 
 	<ItemGroup>
