@@ -34,12 +34,13 @@ public class SignedRequestAuthenticationHandler(
 	ISignedRequestClientResolver clientResolver,
 	ISignatureValidator signatureValidator,
 	IOptions<SignatureValidationOptions> validationOptions,
+	RecyclableMemoryStreamManager streamManager,
 	ISignatureValidationEvents? events = null
 ) : AuthenticationHandler<SignedRequestAuthenticationOptions>(options, logger, encoder) {
 
 	private readonly ISignatureValidationEvents _events = events ?? NullSignatureValidationEvents.Instance;
 	private readonly SignatureValidationOptions _validationOptions = validationOptions?.Value ?? new SignatureValidationOptions();
-	private readonly RecyclableMemoryStreamManager _streamManager = new RecyclableMemoryStreamManager();
+	private readonly RecyclableMemoryStreamManager _streamManager = streamManager;
 
 	/// <inheritdoc/>
 	protected override async Task<AuthenticateResult> HandleAuthenticateAsync() {
@@ -175,9 +176,8 @@ public class SignedRequestAuthenticationHandler(
 	}
 
 	private async Task<string?> ComputeBodyHashAsync() {
-		// Only compute body hash for methods that have a body
 		if (this.Request.Method is "GET" or "HEAD" or "DELETE" or "OPTIONS") {
-			return null; // Will use empty body hash
+			return null;
 		}
 
 		if (!this.Request.Body.CanSeek) {
@@ -185,15 +185,14 @@ public class SignedRequestAuthenticationHandler(
 		}
 
 		var originalPosition = this.Request.Body.Position;
-
 		try {
 			this.Request.Body.Position = 0;
-
 			await using var memoryStream = this._streamManager.GetStream();
 			await this.Request.Body.CopyToAsync(memoryStream, this.Context.RequestAborted);
 
-			var bodyBytes = memoryStream.ToArray();
-			return signatureValidator.ComputeBodyHash(bodyBytes);
+			return signatureValidator.ComputeBodyHash(
+				memoryStream.GetBuffer().AsSpan(0, (int)memoryStream.Length));
+
 		} finally {
 			this.Request.Body.Position = originalPosition;
 		}
