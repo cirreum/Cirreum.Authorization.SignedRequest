@@ -60,7 +60,7 @@ builder
     .AddSignatureValidationEvents<RateLimitingEvents>()  // Optional
     .AddPolicy("Partner", policy => {
         policy
-            .AddAuthenticationSchemes("SignedRequest")
+            .AddAuthenticationSchemes(SignedRequestDefaults.AuthenticationScheme)
             .RequireAuthenticatedUser()
             .RequireRole("partner");
     });
