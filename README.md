@@ -54,16 +54,16 @@ dotnet add package Cirreum.Authorization.SignedRequest
 ### 1. Register in Program.cs
 
 ```csharp
-builder
-    .AddAuthorization()
-    .AddSignedRequestAuth<DatabaseSignedRequestResolver>()
+builder.AddAuthorization(auth => auth
+    .AddSignedRequest<DatabaseSignedRequestResolver>()
     .AddSignatureValidationEvents<RateLimitingEvents>()  // Optional
-    .AddPolicy("Partner", policy => {
-        policy
-            .AddAuthenticationSchemes(SignedRequestDefaults.AuthenticationScheme)
-            .RequireAuthenticatedUser()
-            .RequireRole("partner");
-    });
+)
+.AddPolicy("Partner", policy => {
+    policy
+        .AddAuthenticationSchemes(SignedRequestDefaults.AuthenticationScheme)
+        .RequireAuthenticatedUser()
+        .RequireRole("partner");
+});
 ```
 
 ### 2. Implement the Resolver
@@ -238,9 +238,8 @@ var response = await httpClient.SendAsync(request);
 Configure app-wide defaults at startup:
 
 ```csharp
-builder
-    .AddAuthorization()
-    .AddSignedRequestAuth<DatabaseSignedRequestResolver>(options => options
+builder.AddAuthorization(auth => auth
+    .AddSignedRequest<DatabaseSignedRequestResolver>(options => options
         .ConfigureValidation(v => {
             v.TimestampTolerance = TimeSpan.FromMinutes(2);      // Max request age
             v.FutureTimestampTolerance = TimeSpan.FromSeconds(30); // Clock skew allowance
@@ -248,7 +247,8 @@ builder
             v.ClientIdHeaderName = "X-Client-Id";                 // Customizable headers
             v.SignatureHeaderName = "X-Signature";
             v.TimestampHeaderName = "X-Timestamp";
-        }));
+        }))
+);
 ```
 
 ### Per-Client Overrides
