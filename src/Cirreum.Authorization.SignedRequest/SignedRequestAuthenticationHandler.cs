@@ -168,6 +168,19 @@ public class SignedRequestAuthenticationHandler(
 		return AuthenticateResult.Success(ticket);
 	}
 
+	/// <inheritdoc/>
+	protected override Task HandleChallengeAsync(AuthenticationProperties properties) {
+		this.Response.StatusCode = 401;
+		this.Response.Headers.WWWAuthenticate = $"SignedRequest realm=\"{this.Scheme.Name}\"";
+		return Task.CompletedTask;
+	}
+
+	/// <inheritdoc/>
+	protected override Task HandleForbiddenAsync(AuthenticationProperties properties) {
+		this.Response.StatusCode = 403;
+		return Task.CompletedTask;
+	}
+
 	private string? GetHeaderValue(string headerName) {
 		if (this.Request.Headers.TryGetValue(headerName, out var values)) {
 			return values.FirstOrDefault();
