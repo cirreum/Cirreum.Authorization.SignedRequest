@@ -1,4 +1,4 @@
-namespace Cirreum.AuthorizationProvider.SignedRequest;
+namespace Cirreum.Authorization.SignedRequest;
 
 using Microsoft.AspNetCore.Authentication;
 

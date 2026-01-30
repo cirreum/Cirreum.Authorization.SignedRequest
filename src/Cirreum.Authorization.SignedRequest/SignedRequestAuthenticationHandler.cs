@@ -1,5 +1,6 @@
-namespace Cirreum.AuthorizationProvider.SignedRequest;
+namespace Cirreum.Authorization.SignedRequest;
 
+using Cirreum.AuthorizationProvider.SignedRequest;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
